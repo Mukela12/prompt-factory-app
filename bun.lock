@@ -30,8 +30,6 @@
         "@prompt-factory/client-runtime": "workspace:*",
         "@prompt-factory/contracts": "workspace:*",
         "@prompt-factory/shared": "workspace:*",
-        "@prompt-factory/ssh": "workspace:*",
-        "@prompt-factory/tailscale": "workspace:*",
         "@types/node": "catalog:",
         "effect-acp": "workspace:*",
         "tsdown": "catalog:",
@@ -60,8 +58,8 @@
         "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
         "@prompt-factory/contracts": "workspace:*",
+        "@prompt-factory/lmstudio": "workspace:*",
         "@prompt-factory/shared": "workspace:*",
-        "@prompt-factory/tailscale": "workspace:*",
         "@prompt-factory/web": "workspace:*",
         "@types/bun": "catalog:",
         "@types/node": "catalog:",
@@ -217,38 +215,6 @@
       "devDependencies": {
         "@effect/language-service": "catalog:",
         "@effect/platform-node": "catalog:",
-        "@effect/vitest": "catalog:",
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/ssh": {
-      "name": "@prompt-factory/ssh",
-      "version": "0.0.0-alpha.1",
-      "dependencies": {
-        "@prompt-factory/contracts": "workspace:*",
-        "@prompt-factory/shared": "workspace:*",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/language-service": "catalog:",
-        "@effect/platform-node": "catalog:",
-        "@effect/vitest": "catalog:",
-        "@types/node": "catalog:",
-        "typescript": "catalog:",
-        "vitest": "catalog:",
-      },
-    },
-    "packages/tailscale": {
-      "name": "@prompt-factory/tailscale",
-      "version": "0.0.0-alpha.1",
-      "dependencies": {
-        "@effect/platform-node": "catalog:",
-        "effect": "catalog:",
-      },
-      "devDependencies": {
-        "@effect/language-service": "catalog:",
         "@effect/vitest": "catalog:",
         "@types/node": "catalog:",
         "typescript": "catalog:",
@@ -687,10 +653,6 @@
     "@prompt-factory/scripts": ["@prompt-factory/scripts@workspace:scripts"],
 
     "@prompt-factory/shared": ["@prompt-factory/shared@workspace:packages/shared"],
-
-    "@prompt-factory/ssh": ["@prompt-factory/ssh@workspace:packages/ssh"],
-
-    "@prompt-factory/tailscale": ["@prompt-factory/tailscale@workspace:packages/tailscale"],
 
     "@prompt-factory/web": ["@prompt-factory/web@workspace:apps/web"],
 

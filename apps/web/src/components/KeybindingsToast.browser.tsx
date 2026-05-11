@@ -130,6 +130,14 @@ function createBaseServerConfig(): ServerConfig {
           serverPassword: "",
           customModels: [],
         },
+        lmStudio: {
+          enabled: true,
+          baseUrl: "http://127.0.0.1:1234",
+          apiPath: "/v1/chat/completions",
+          defaultModel: "mistralai/devstral-small-2-2512",
+          requestTimeoutMs: 120_000,
+          maxRounds: 12,
+        },
       },
     },
   };

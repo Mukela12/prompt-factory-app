@@ -38,6 +38,7 @@
     "@effect/language-service": "catalog:",
     "@effect/vitest": "catalog:",
     "@prompt-factory/contracts": "workspace:*",
+    "@prompt-factory/lmstudio": "workspace:*",
     "@prompt-factory/shared": "workspace:*",
     "@prompt-factory/web": "workspace:*",
     "@types/bun": "catalog:",

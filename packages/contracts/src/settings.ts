@@ -281,6 +281,99 @@ export const CursorSettings = makeProviderSettingsSchema(
 );
 export type CursorSettings = typeof CursorSettings.Type;
 
+export const LMSTUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234";
+export const LMSTUDIO_DEFAULT_API_PATH = "/v1/chat/completions";
+export const LMSTUDIO_DEFAULT_MODEL = "mistralai/devstral-small-2-2512";
+export const LMSTUDIO_DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+export const LMSTUDIO_DEFAULT_MAX_ROUNDS = 12;
+
+export const LMStudioSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    baseUrl: TrimmedString.pipe(
+      Schema.decodeTo(
+        Schema.String,
+        SchemaTransformation.transformOrFail({
+          decode: (value) => Effect.succeed(value || LMSTUDIO_DEFAULT_BASE_URL),
+          encode: (value) => Effect.succeed(value),
+        }),
+      ),
+      Schema.withDecodingDefault(Effect.succeed(LMSTUDIO_DEFAULT_BASE_URL)),
+      Schema.annotateKey({
+        title: "Base URL",
+        description: "Root URL of the LM Studio OpenAI-compatible server.",
+        providerSettingsForm: {
+          placeholder: LMSTUDIO_DEFAULT_BASE_URL,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    apiPath: TrimmedString.pipe(
+      Schema.decodeTo(
+        Schema.String,
+        SchemaTransformation.transformOrFail({
+          decode: (value) => Effect.succeed(value || LMSTUDIO_DEFAULT_API_PATH),
+          encode: (value) => Effect.succeed(value),
+        }),
+      ),
+      Schema.withDecodingDefault(Effect.succeed(LMSTUDIO_DEFAULT_API_PATH)),
+      Schema.annotateKey({
+        title: "Chat completions path",
+        description: "Path appended to the base URL for chat completions.",
+        providerSettingsForm: {
+          placeholder: LMSTUDIO_DEFAULT_API_PATH,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    defaultModel: TrimmedString.pipe(
+      Schema.decodeTo(
+        Schema.String,
+        SchemaTransformation.transformOrFail({
+          decode: (value) => Effect.succeed(value || LMSTUDIO_DEFAULT_MODEL),
+          encode: (value) => Effect.succeed(value),
+        }),
+      ),
+      Schema.withDecodingDefault(Effect.succeed(LMSTUDIO_DEFAULT_MODEL)),
+      Schema.annotateKey({
+        title: "Default model",
+        description: "Model id LM Studio should serve by default.",
+        providerSettingsForm: {
+          placeholder: LMSTUDIO_DEFAULT_MODEL,
+          clearWhenEmpty: "omit",
+        },
+      }),
+    ),
+    requestTimeoutMs: Schema.Number.pipe(
+      Schema.withDecodingDefault(Effect.succeed(LMSTUDIO_DEFAULT_REQUEST_TIMEOUT_MS)),
+      Schema.annotateKey({
+        title: "Request timeout (ms)",
+        description: "Abort an LM Studio request that takes longer than this many milliseconds.",
+        providerSettingsForm: {
+          placeholder: String(LMSTUDIO_DEFAULT_REQUEST_TIMEOUT_MS),
+        },
+      }),
+    ),
+    maxRounds: Schema.Number.pipe(
+      Schema.withDecodingDefault(Effect.succeed(LMSTUDIO_DEFAULT_MAX_ROUNDS)),
+      Schema.annotateKey({
+        title: "Max agent rounds",
+        description: "Upper bound on tool-call rounds before the local agent stops.",
+        providerSettingsForm: {
+          placeholder: String(LMSTUDIO_DEFAULT_MAX_ROUNDS),
+        },
+      }),
+    ),
+  },
+  {
+    order: ["baseUrl", "apiPath", "defaultModel", "requestTimeoutMs", "maxRounds"],
+  },
+);
+export type LMStudioSettings = typeof LMStudioSettings.Type;
+
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -370,6 +463,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    lmStudio: LMStudioSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
@@ -445,6 +539,16 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 
+export const LMStudioSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  baseUrl: Schema.optionalKey(TrimmedString),
+  apiPath: Schema.optionalKey(TrimmedString),
+  defaultModel: Schema.optionalKey(TrimmedString),
+  requestTimeoutMs: Schema.optionalKey(Schema.Number),
+  maxRounds: Schema.optionalKey(Schema.Number),
+});
+export type LMStudioSettingsPatch = typeof LMStudioSettingsPatch.Type;
+
 export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
@@ -464,6 +568,7 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
+      lmStudio: Schema.optionalKey(LMStudioSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual
