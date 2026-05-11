@@ -9,8 +9,6 @@ export const DesktopBackendBootstrap = Schema.Struct({
   t3Home: Schema.String,
   host: Schema.String,
   desktopBootstrapToken: Schema.String,
-  tailscaleServeEnabled: Schema.Boolean,
-  tailscaleServePort: PortSchema,
   otlpTracesUrl: Schema.optional(Schema.String),
   otlpMetricsUrl: Schema.optional(Schema.String),
 });

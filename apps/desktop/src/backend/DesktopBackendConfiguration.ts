@@ -40,8 +40,6 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   "PROMPTFACTORY_DESKTOP_LAN_ACCESS",
   "PROMPTFACTORY_DESKTOP_LAN_HOST",
   "PROMPTFACTORY_DESKTOP_HTTPS_ENDPOINTS",
-  "PROMPTFACTORY_TAILSCALE_SERVE",
-  "PROMPTFACTORY_TAILSCALE_SERVE_PORT",
 ] as const;
 
 const backendChildEnvPatch = (): Record<string, string | undefined> =>
@@ -125,8 +123,6 @@ const resolveBackendStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         t3Home: environment.baseDir,
         host: backendExposure.bindHost,
         desktopBootstrapToken: input.bootstrapToken,
-        tailscaleServeEnabled: backendExposure.tailscaleServeEnabled,
-        tailscaleServePort: backendExposure.tailscaleServePort,
         ...Option.match(input.observabilitySettings.otlpTracesUrl, {
           onNone: () => ({}),
           onSome: (otlpTracesUrl) => ({ otlpTracesUrl }),

@@ -26,8 +26,6 @@
     "@prompt-factory/client-runtime": "workspace:*",
     "@prompt-factory/contracts": "workspace:*",
     "@prompt-factory/shared": "workspace:*",
-    "@prompt-factory/ssh": "workspace:*",
-    "@prompt-factory/tailscale": "workspace:*",
     "@types/node": "catalog:",
     "effect-acp": "workspace:*",
     "tsdown": "catalog:",

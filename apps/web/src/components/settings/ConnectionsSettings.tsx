@@ -1,10 +1,7 @@
 import {
   ChevronDownIcon,
-  ChevronsLeftRightEllipsisIcon,
   PlusIcon,
   QrCodeIcon,
-  RefreshCwIcon,
-  TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import { type ReactNode, memo, useCallback, useEffect, useMemo, useState } from "react";
@@ -12,8 +9,6 @@ import {
   type AuthClientSession,
   type AuthPairingLink,
   type AdvertisedEndpoint,
-  type DesktopDiscoveredSshHost,
-  type DesktopSshEnvironmentTarget,
   type DesktopServerExposureState,
   type EnvironmentId,
 } from "@prompt-factory/contracts";
@@ -88,7 +83,6 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
   addSavedEnvironment,
-  connectDesktopSshEnvironment,
   disconnectSavedEnvironment,
   getPrimaryEnvironmentConnection,
   reconnectSavedEnvironment,
@@ -97,8 +91,6 @@ import {
 import { useUiStateStore } from "~/uiStateStore";
 import { resolveServerConfigVersionMismatch } from "~/versionSkew";
 import { useServerConfig } from "~/rpc/serverState";
-
-const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 
 const accessTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -192,69 +184,6 @@ function getSavedBackendStatusTooltip(
     : "Not connected yet.";
 }
 
-function formatDesktopSshTarget(target: NonNullable<SavedEnvironmentRecord["desktopSsh"]>): string {
-  const authority = target.username ? `${target.username}@${target.hostname}` : target.hostname;
-  return target.port ? `${authority}:${target.port}` : authority;
-}
-
-function parseManualDesktopSshTarget(input: {
-  readonly host: string;
-  readonly username: string;
-  readonly port: string;
-}): DesktopSshEnvironmentTarget {
-  const rawHost = input.host.trim();
-  if (rawHost.length === 0) {
-    throw new Error("SSH host or alias is required.");
-  }
-
-  let hostname = rawHost;
-  let username = input.username.trim() || null;
-  let port: number | null = null;
-
-  const atIndex = hostname.lastIndexOf("@");
-  if (atIndex > 0) {
-    const inlineUsername = hostname.slice(0, atIndex).trim();
-    hostname = hostname.slice(atIndex + 1).trim();
-    if (!username && inlineUsername.length > 0) {
-      username = inlineUsername;
-    }
-  }
-
-  const bracketedHostMatch = /^\[([^\]]+)\](?::(\d+))?$/u.exec(hostname);
-  if (bracketedHostMatch) {
-    hostname = bracketedHostMatch[1]!.trim();
-    if (bracketedHostMatch[2]) {
-      port = Number.parseInt(bracketedHostMatch[2], 10);
-    }
-  } else {
-    const colonSegments = hostname.split(":");
-    if (colonSegments.length === 2 && /^\d+$/u.test(colonSegments[1] ?? "")) {
-      hostname = colonSegments[0]!.trim();
-      port = Number.parseInt(colonSegments[1]!, 10);
-    }
-  }
-
-  const rawPort = input.port.trim();
-  if (rawPort.length > 0) {
-    port = Number.parseInt(rawPort, 10);
-  }
-
-  if (hostname.length === 0) {
-    throw new Error("SSH host or alias is required.");
-  }
-
-  if (port !== null && (!Number.isInteger(port) || port <= 0 || port > 65_535)) {
-    throw new Error("SSH port must be between 1 and 65535.");
-  }
-
-  return {
-    alias: hostname,
-    hostname,
-    username,
-    port,
-  };
-}
-
 function parsePairingUrlFields(
   input: string,
 ): { readonly host: string; readonly pairingCode: string } | null {
@@ -294,17 +223,6 @@ function parseRemotePairingFields(input: { readonly host: string; readonly pairi
     throw new Error("Enter a pairing code.");
   }
   return { host, pairingCode };
-}
-
-function formatDesktopSshConnectionError(error: unknown): string {
-  const fallback = "Failed to connect SSH host.";
-  const rawMessage = error instanceof Error ? error.message : fallback;
-  const withoutIpcPrefix = rawMessage.replace(
-    /^Error invoking remote method 'desktop:ensure-ssh-environment':\s*/u,
-    "",
-  );
-  const withoutTaggedErrorPrefix = withoutIpcPrefix.replace(/^Ssh[A-Za-z]+Error:\s*/u, "");
-  return withoutTaggedErrorPrefix.trim() || fallback;
 }
 
 /** Direct row in the card – same pattern as the Provider / ACP-agent list rows. */
@@ -429,22 +347,12 @@ function selectPairingEndpoint(
   );
 }
 
-function isTailscaleHttpsEndpoint(endpoint: AdvertisedEndpoint): boolean {
-  return endpoint.id.startsWith("tailscale-magicdns:");
-}
-
 function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string {
   if (endpoint.id.startsWith("desktop-loopback:")) {
     return "desktop-core:loopback:http";
   }
   if (endpoint.id.startsWith("desktop-lan:")) {
     return "desktop-core:lan:http";
-  }
-  if (endpoint.id.startsWith("tailscale-ip:")) {
-    return "tailscale:ip:http";
-  }
-  if (isTailscaleHttpsEndpoint(endpoint)) {
-    return "tailscale:magicdns:https";
   }
 
   let scheme = "unknown";
@@ -1094,9 +1002,6 @@ type AdvertisedEndpointListRowProps = {
   isDefault: boolean;
   presentation?: AccessSectionPresentation;
   onSetDefault: (endpoint: AdvertisedEndpoint) => void;
-  onSetupTailscaleServe: (endpoint: AdvertisedEndpoint) => void;
-  onDisableTailscaleServe: (endpoint: AdvertisedEndpoint) => void;
-  isUpdatingTailscaleServe: boolean;
 };
 
 const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
@@ -1104,15 +1009,8 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
   isDefault,
   presentation = "current",
   onSetDefault,
-  onSetupTailscaleServe,
-  onDisableTailscaleServe,
-  isUpdatingTailscaleServe,
 }: AdvertisedEndpointListRowProps) {
   const isAvailable = endpoint.status === "available";
-  const needsTailscaleSetup = isTailscaleHttpsEndpoint(endpoint) && endpoint.status !== "available";
-  const canDisableTailscaleServe =
-    isTailscaleHttpsEndpoint(endpoint) && endpoint.status === "available";
-  const shouldShowEndpointUrl = !needsTailscaleSetup;
   const isEndpointRail = presentation === "endpoint-rail";
   return (
     <div className={endpointRowClassName(presentation, isAvailable)}>
@@ -1124,14 +1022,12 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
           <h3 className="shrink-0 text-sm leading-5 font-medium text-foreground">
             {endpoint.label}
           </h3>
-          {shouldShowEndpointUrl ? (
-            <p
-              className="min-w-0 truncate text-xs leading-5 text-muted-foreground"
-              title={endpoint.httpBaseUrl}
-            >
-              {endpoint.httpBaseUrl}
-            </p>
-          ) : null}
+          <p
+            className="min-w-0 truncate text-xs leading-5 text-muted-foreground"
+            title={endpoint.httpBaseUrl}
+          >
+            {endpoint.httpBaseUrl}
+          </p>
           {!isAvailable ? (
             <span className="shrink-0 rounded-md border border-border/70 px-1 py-0.5 text-[10px] text-muted-foreground">
               Setup required
@@ -1144,27 +1040,7 @@ const AdvertisedEndpointListRow = memo(function AdvertisedEndpointListRow({
               Default
             </span>
           ) : null}
-          {needsTailscaleSetup ? (
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => onSetupTailscaleServe(endpoint)}
-              disabled={isUpdatingTailscaleServe}
-            >
-              {isUpdatingTailscaleServe ? "Restarting…" : "Setup"}
-            </Button>
-          ) : null}
-          {canDisableTailscaleServe ? (
-            <Button
-              size="xs"
-              variant="destructive-outline"
-              onClick={() => onDisableTailscaleServe(endpoint)}
-              disabled={isUpdatingTailscaleServe}
-            >
-              {isUpdatingTailscaleServe ? "Restarting…" : "Disable"}
-            </Button>
-          ) : null}
-          {!needsTailscaleSetup && !isDefault ? (
+          {!isDefault ? (
             <Button size="xs" variant="outline" onClick={() => onSetDefault(endpoint)}>
               Set as default
             </Button>
@@ -1268,7 +1144,6 @@ function SavedBackendListRow({
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const versionMismatch = resolveServerConfigVersionMismatch(runtime?.serverConfig);
   const metadataBits = [
-    record.desktopSsh ? `SSH ${formatDesktopSshTarget(record.desktopSsh)}` : null,
     roleLabel,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`
@@ -1331,46 +1206,6 @@ function SavedBackendListRow({
   );
 }
 
-interface DesktopSshHostRowProps {
-  target: DesktopDiscoveredSshHost;
-  connectingHostAlias: string | null;
-  onConnect: (target: DesktopDiscoveredSshHost) => void;
-}
-
-const DesktopSshHostRow = memo(function DesktopSshHostRow({
-  target,
-  connectingHostAlias,
-  onConnect,
-}: DesktopSshHostRowProps) {
-  const address = formatDesktopSshTarget(target);
-  const showAddress = address !== target.alias;
-  const buttonLabel = connectingHostAlias === target.alias ? "Adding…" : "Add environment";
-
-  return (
-    <div className="border-t border-border/60 px-4 py-3 first:border-t-0 sm:px-5">
-      <div className={ITEM_ROW_INNER_CLASSNAME}>
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-medium text-foreground">{target.alias}</h3>
-          {showAddress ? <p className="truncate text-xs text-muted-foreground">{address}</p> : null}
-        </div>
-        <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
-          <Button
-            size="xs"
-            variant="outline"
-            disabled={connectingHostAlias === target.alias}
-            onClick={() => onConnect(target)}
-          >
-            {connectingHostAlias === target.alias ? (
-              <RefreshCwIcon className="size-3 animate-spin" />
-            ) : null}
-            {buttonLabel}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-});
-
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
   const [currentSessionRole, setCurrentSessionRole] = useState<"owner" | "client" | null>(
@@ -1387,37 +1222,6 @@ export function ConnectionsSettings() {
         .map((record) => record.environmentId),
     [savedEnvironmentsById],
   );
-  const savedDesktopSshEnvironmentsByAlias = useMemo(
-    () =>
-      Object.values(savedEnvironmentsById).reduce<Record<string, SavedEnvironmentRecord>>(
-        (accumulator, record) => {
-          if (record.desktopSsh?.alias) {
-            accumulator[record.desktopSsh.alias] = record;
-          }
-          return accumulator;
-        },
-        {},
-      ),
-    [savedEnvironmentsById],
-  );
-  const savedDesktopSshEnvironmentKeys = useMemo(() => {
-    const keys = new Set<string>();
-    for (const record of Object.values(savedEnvironmentsById)) {
-      const target = record.desktopSsh;
-      if (!target) continue;
-      keys.add(target.alias);
-      keys.add(formatDesktopSshTarget(target));
-    }
-    return keys;
-  }, [savedEnvironmentsById]);
-  const [discoveredSshHosts, setDiscoveredSshHosts] = useState<
-    ReadonlyArray<DesktopDiscoveredSshHost>
-  >([]);
-  const [hasLoadedDiscoveredSshHosts, setHasLoadedDiscoveredSshHosts] = useState(false);
-  const [isLoadingDiscoveredSshHosts, setIsLoadingDiscoveredSshHosts] = useState(false);
-  const [discoveredSshHostsError, setDiscoveredSshHostsError] = useState<string | null>(null);
-  const [connectingSshHostAlias, setConnectingSshHostAlias] = useState<string | null>(null);
-
   const [desktopServerExposureState, setDesktopServerExposureState] =
     useState<DesktopServerExposureState | null>(null);
   const [desktopAdvertisedEndpoints, setDesktopAdvertisedEndpoints] = useState<
@@ -1442,25 +1246,10 @@ export function ConnectionsSettings() {
   >(null);
   const [isRevokingOtherDesktopClients, setIsRevokingOtherDesktopClients] = useState(false);
   const [addBackendDialogOpen, setAddBackendDialogOpen] = useState(false);
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
-  const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
-  const [savedBackendSshUsername, setSavedBackendSshUsername] = useState("");
-  const [savedBackendSshPort, setSavedBackendSshPort] = useState("");
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   const [isAddingSavedBackend, setIsAddingSavedBackend] = useState(false);
-  const unsavedDiscoveredSshHosts = useMemo(
-    () =>
-      discoveredSshHosts.filter((target) => {
-        const address = formatDesktopSshTarget(target);
-        return (
-          !savedDesktopSshEnvironmentKeys.has(target.alias) &&
-          !savedDesktopSshEnvironmentKeys.has(address)
-        );
-      }),
-    [discoveredSshHosts, savedDesktopSshEnvironmentKeys],
-  );
   const [reconnectingSavedEnvironmentId, setReconnectingSavedEnvironmentId] =
     useState<EnvironmentId | null>(null);
   const [disconnectingSavedEnvironmentId, setDisconnectingSavedEnvironmentId] =
@@ -1469,13 +1258,6 @@ export function ConnectionsSettings() {
     useState<EnvironmentId | null>(null);
   const [isUpdatingDesktopServerExposure, setIsUpdatingDesktopServerExposure] = useState(false);
   const [isDesktopServerExposureDialogOpen, setIsDesktopServerExposureDialogOpen] = useState(false);
-  const [isUpdatingTailscaleServe, setIsUpdatingTailscaleServe] = useState(false);
-  const [pendingTailscaleServeEndpoint, setPendingTailscaleServeEndpoint] =
-    useState<AdvertisedEndpoint | null>(null);
-  const [disableTailscaleServeDialogOpen, setDisableTailscaleServeDialogOpen] = useState(false);
-  const [tailscaleServePortInput, setTailscaleServePortInput] = useState(
-    String(DEFAULT_TAILSCALE_SERVE_PORT),
-  );
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
@@ -1492,28 +1274,6 @@ export function ConnectionsSettings() {
   const isLocalBackendNetworkAccessible = desktopBridge
     ? desktopServerExposureState?.mode === "network-accessible"
     : currentAuthPolicy === "remote-reachable";
-  const trimmedTailscaleServePortInput = tailscaleServePortInput.trim();
-  const parsedTailscaleServePort = Number(trimmedTailscaleServePortInput);
-  const isTailscaleServePortValid =
-    /^\d+$/u.test(trimmedTailscaleServePortInput) &&
-    Number.isInteger(parsedTailscaleServePort) &&
-    parsedTailscaleServePort >= 1 &&
-    parsedTailscaleServePort <= 65_535;
-
-  const pendingTailscaleServeBaseUrl = useMemo(() => {
-    if (!pendingTailscaleServeEndpoint) return null;
-    if (!isTailscaleServePortValid) return pendingTailscaleServeEndpoint.httpBaseUrl;
-    if (parsedTailscaleServePort === DEFAULT_TAILSCALE_SERVE_PORT) {
-      return pendingTailscaleServeEndpoint.httpBaseUrl;
-    }
-    try {
-      const url = new URL(pendingTailscaleServeEndpoint.httpBaseUrl);
-      url.port = String(parsedTailscaleServePort);
-      return url.toString().replace(/\/$/u, "");
-    } catch {
-      return pendingTailscaleServeEndpoint.httpBaseUrl;
-    }
-  }, [isTailscaleServePortValid, parsedTailscaleServePort, pendingTailscaleServeEndpoint]);
 
   const handleDesktopServerExposureChange = useCallback(
     async (checked: boolean) => {
@@ -1550,74 +1310,6 @@ export function ConnectionsSettings() {
     const checked = pendingDesktopServerExposureMode === "network-accessible";
     void handleDesktopServerExposureChange(checked);
   }, [handleDesktopServerExposureChange, pendingDesktopServerExposureMode]);
-
-  const handleConfirmTailscaleServeSetup = useCallback(async () => {
-    if (!desktopBridge) return;
-    if (!isTailscaleServePortValid) return;
-    setIsUpdatingTailscaleServe(true);
-    setDesktopServerExposureError(null);
-    try {
-      const nextState = await desktopBridge.setTailscaleServeEnabled({
-        enabled: true,
-        port: parsedTailscaleServePort,
-      });
-      setDesktopServerExposureState(nextState);
-      setPendingTailscaleServeEndpoint(null);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Failed to configure Tailscale HTTPS.";
-      setDesktopServerExposureError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not set up Tailscale HTTPS",
-          description: message,
-        }),
-      );
-    } finally {
-      setIsUpdatingTailscaleServe(false);
-    }
-  }, [desktopBridge, isTailscaleServePortValid, parsedTailscaleServePort]);
-
-  const handleStartTailscaleServeSetup = useCallback(
-    (endpoint: AdvertisedEndpoint) => {
-      setTailscaleServePortInput(
-        String(desktopServerExposureState?.tailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT),
-      );
-      setPendingTailscaleServeEndpoint(endpoint);
-    },
-    [desktopServerExposureState?.tailscaleServePort],
-  );
-
-  const handleConfirmTailscaleServeDisable = useCallback(async () => {
-    if (!desktopBridge) return;
-    setIsUpdatingTailscaleServe(true);
-    setDesktopServerExposureError(null);
-    try {
-      const nextState = await desktopBridge.setTailscaleServeEnabled({
-        enabled: false,
-        port: desktopServerExposureState?.tailscaleServePort ?? DEFAULT_TAILSCALE_SERVE_PORT,
-      });
-      setDesktopServerExposureState(nextState);
-      setDisableTailscaleServeDialogOpen(false);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to disable Tailscale HTTPS.";
-      setDesktopServerExposureError(message);
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not disable Tailscale HTTPS",
-          description: message,
-        }),
-      );
-    } finally {
-      setIsUpdatingTailscaleServe(false);
-    }
-  }, [desktopBridge, desktopServerExposureState?.tailscaleServePort]);
-
-  const handleStartTailscaleServeDisable = useCallback((_endpoint: AdvertisedEndpoint) => {
-    setDisableTailscaleServeDialogOpen(true);
-  }, []);
 
   const handleRevokeDesktopPairingLink = useCallback(async (id: string) => {
     setRevokingDesktopPairingLinkId(id);
@@ -1688,37 +1380,6 @@ export function ConnectionsSettings() {
   }, []);
 
   const handleAddSavedBackend = useCallback(async () => {
-    if (savedBackendMode === "ssh") {
-      setIsAddingSavedBackend(true);
-      setSavedBackendError(null);
-      try {
-        const target = parseManualDesktopSshTarget({
-          host: savedBackendSshHost,
-          username: savedBackendSshUsername,
-          port: savedBackendSshPort,
-        });
-        const record = await connectDesktopSshEnvironment(target, { label: "" });
-        setSavedBackendHost("");
-        setSavedBackendPairingCode("");
-        setSavedBackendSshHost("");
-        setSavedBackendSshUsername("");
-        setSavedBackendSshPort("");
-
-        setAddBackendDialogOpen(false);
-        toastManager.add({
-          type: "success",
-          title: "Environment connected",
-          description: `${record.label} is ready over an SSH-managed tunnel.`,
-        });
-      } catch (error) {
-        const message = formatDesktopSshConnectionError(error);
-        setSavedBackendError(message);
-      } finally {
-        setIsAddingSavedBackend(false);
-      }
-      return;
-    }
-
     setIsAddingSavedBackend(true);
     setSavedBackendError(null);
     try {
@@ -1732,9 +1393,6 @@ export function ConnectionsSettings() {
       });
       setSavedBackendHost("");
       setSavedBackendPairingCode("");
-      setSavedBackendSshHost("");
-      setSavedBackendSshUsername("");
-      setSavedBackendSshPort("");
       setAddBackendDialogOpen(false);
       toastManager.add({
         type: "success",
@@ -1754,14 +1412,7 @@ export function ConnectionsSettings() {
     } finally {
       setIsAddingSavedBackend(false);
     }
-  }, [
-    savedBackendHost,
-    savedBackendMode,
-    savedBackendPairingCode,
-    savedBackendSshHost,
-    savedBackendSshPort,
-    savedBackendSshUsername,
-  ]);
+  }, [savedBackendHost, savedBackendPairingCode]);
 
   const handleConnectSavedBackend = useCallback(async (environmentId: EnvironmentId) => {
     setReconnectingSavedEnvironmentId(environmentId);
@@ -1822,84 +1473,6 @@ export function ConnectionsSettings() {
       setRemovingSavedEnvironmentId(null);
     }
   }, []);
-
-  const loadDiscoveredSshHosts = useCallback(async () => {
-    if (!desktopBridge) {
-      setDiscoveredSshHosts([]);
-      setHasLoadedDiscoveredSshHosts(false);
-      setDiscoveredSshHostsError(null);
-      return;
-    }
-
-    setIsLoadingDiscoveredSshHosts(true);
-    setDiscoveredSshHostsError(null);
-    try {
-      const hosts = await desktopBridge.discoverSshHosts();
-      setDiscoveredSshHosts(hosts);
-      setHasLoadedDiscoveredSshHosts(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to discover SSH hosts.";
-      setDiscoveredSshHostsError(message);
-      setHasLoadedDiscoveredSshHosts(true);
-    } finally {
-      setIsLoadingDiscoveredSshHosts(false);
-    }
-  }, [desktopBridge]);
-
-  const handleConnectSshHost = useCallback(
-    async (target: DesktopSshEnvironmentTarget, label?: string) => {
-      setConnectingSshHostAlias(target.alias);
-      if (savedBackendMode === "ssh") {
-        setSavedBackendError(null);
-      } else {
-        setDiscoveredSshHostsError(null);
-      }
-      try {
-        const record = await connectDesktopSshEnvironment(
-          target,
-          label === undefined ? undefined : { label },
-        );
-        setSavedBackendSshHost("");
-        setSavedBackendSshUsername("");
-        setSavedBackendSshPort("");
-        setAddBackendDialogOpen(false);
-        toastManager.add({
-          type: "success",
-          title: savedDesktopSshEnvironmentsByAlias[target.alias]
-            ? "Environment reconnected"
-            : "Environment connected",
-          description: `${record.label} is ready over an SSH-managed tunnel.`,
-        });
-      } catch (error) {
-        const message = formatDesktopSshConnectionError(error);
-        if (savedBackendMode === "ssh") {
-          setSavedBackendError(message);
-        } else {
-          setDiscoveredSshHostsError(message);
-        }
-      } finally {
-        setConnectingSshHostAlias(null);
-      }
-    },
-    [savedBackendMode, savedDesktopSshEnvironmentsByAlias],
-  );
-
-  useEffect(() => {
-    if (!desktopBridge || !addBackendDialogOpen || savedBackendMode !== "ssh") {
-      return;
-    }
-    if (hasLoadedDiscoveredSshHosts || isLoadingDiscoveredSshHosts) {
-      return;
-    }
-    void loadDiscoveredSshHosts();
-  }, [
-    addBackendDialogOpen,
-    desktopBridge,
-    hasLoadedDiscoveredSshHosts,
-    isLoadingDiscoveredSshHosts,
-    loadDiscoveredSshHosts,
-    savedBackendMode,
-  ]);
 
   useEffect(() => {
     if (desktopBridge) {
@@ -2041,40 +1614,18 @@ export function ConnectionsSettings() {
     () => desktopPairingLinks.filter((pairingLink) => pairingLink.role === "client"),
     [desktopPairingLinks],
   );
-  const tailscaleHttpsEndpoint = useMemo(
-    () => desktopAdvertisedEndpoints.find(isTailscaleHttpsEndpoint) ?? null,
-    [desktopAdvertisedEndpoints],
-  );
   const visibleDesktopNetworkAdvertisedEndpoints = useMemo(
-    () =>
-      isLocalBackendNetworkAccessible
-        ? desktopAdvertisedEndpoints.filter((endpoint) => !isTailscaleHttpsEndpoint(endpoint))
-        : [],
+    () => (isLocalBackendNetworkAccessible ? desktopAdvertisedEndpoints : []),
     [desktopAdvertisedEndpoints, isLocalBackendNetworkAccessible],
   );
-  const visibleDesktopAdvertisedEndpoints = useMemo(
-    () =>
-      tailscaleHttpsEndpoint
-        ? [...visibleDesktopNetworkAdvertisedEndpoints, tailscaleHttpsEndpoint]
-        : visibleDesktopNetworkAdvertisedEndpoints,
-    [tailscaleHttpsEndpoint, visibleDesktopNetworkAdvertisedEndpoints],
-  );
-  const isLocalBackendRemotelyReachable =
-    isLocalBackendNetworkAccessible || tailscaleHttpsEndpoint?.status === "available";
+  const visibleDesktopAdvertisedEndpoints = visibleDesktopNetworkAdvertisedEndpoints;
+  const isLocalBackendRemotelyReachable = isLocalBackendNetworkAccessible;
   const defaultDesktopNetworkAdvertisedEndpoint = useMemo(
     () =>
       selectPairingEndpoint(visibleDesktopNetworkAdvertisedEndpoints, defaultAdvertisedEndpointKey),
     [defaultAdvertisedEndpointKey, visibleDesktopNetworkAdvertisedEndpoints],
   );
-  const defaultDesktopAdvertisedEndpoint = useMemo(
-    () =>
-      defaultDesktopNetworkAdvertisedEndpoint ??
-      selectPairingEndpoint(
-        tailscaleHttpsEndpoint ? [tailscaleHttpsEndpoint] : [],
-        defaultAdvertisedEndpointKey,
-      ),
-    [defaultAdvertisedEndpointKey, defaultDesktopNetworkAdvertisedEndpoint, tailscaleHttpsEndpoint],
-  );
+  const defaultDesktopAdvertisedEndpoint = defaultDesktopNetworkAdvertisedEndpoint;
   const defaultDesktopAdvertisedEndpointKey = defaultDesktopAdvertisedEndpoint
     ? endpointDefaultPreferenceKey(defaultDesktopAdvertisedEndpoint)
     : null;
@@ -2093,48 +1644,6 @@ export function ConnectionsSettings() {
     }
     setSavedBackendHost(value);
   }, []);
-
-  const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
-    readonly title: string;
-    readonly description: string;
-    readonly icon?: ReactNode;
-  }) => {
-    const selected = savedBackendMode === input.mode;
-    return (
-      <button
-        type="button"
-        aria-pressed={selected}
-        className={cn(
-          "group flex min-h-24 items-start gap-3 rounded-lg border p-4 text-left",
-          selected ? "border-primary/50 bg-primary/5" : "border-border/60 hover:bg-muted/40",
-        )}
-        disabled={isAddingSavedBackend}
-        onClick={() => {
-          setSavedBackendMode(input.mode);
-        }}
-      >
-        {input.icon ? (
-          <span
-            className={cn(
-              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border",
-              selected
-                ? "border-primary/30 bg-primary/10 text-primary"
-                : "border-border/70 bg-background text-muted-foreground group-hover:text-foreground",
-            )}
-          >
-            {input.icon}
-          </span>
-        ) : null}
-        <span className="min-w-0">
-          <span className="block text-sm font-medium text-foreground">{input.title}</span>
-          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-            {input.description}
-          </span>
-        </span>
-      </button>
-    );
-  };
 
   const renderRemoteFields = () => (
     <div className="space-y-3">
@@ -2182,101 +1691,6 @@ export function ConnectionsSettings() {
       </Button>
     </div>
   );
-  const renderSshFields = () => (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-foreground">
-            SSH host or alias
-          </span>
-          <Input
-            value={savedBackendSshHost}
-            onChange={(event) => setSavedBackendSshHost(event.target.value)}
-            placeholder="Search hosts or type devbox"
-            disabled={isAddingSavedBackend}
-            spellCheck={false}
-          />
-        </label>
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem]">
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-foreground">Username</span>
-            <Input
-              value={savedBackendSshUsername}
-              onChange={(event) => setSavedBackendSshUsername(event.target.value)}
-              placeholder="root"
-              disabled={isAddingSavedBackend}
-              spellCheck={false}
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-xs font-medium text-foreground">Port</span>
-            <Input
-              value={savedBackendSshPort}
-              onChange={(event) => setSavedBackendSshPort(event.target.value)}
-              placeholder="22"
-              inputMode="numeric"
-              disabled={isAddingSavedBackend}
-              spellCheck={false}
-            />
-          </label>
-        </div>
-        {savedBackendError || discoveredSshHostsError ? (
-          <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-            {savedBackendError ?? discoveredSshHostsError}
-          </div>
-        ) : null}
-        <Button
-          variant="outline"
-          className="w-full"
-          disabled={isAddingSavedBackend}
-          onClick={() => void handleAddSavedBackend()}
-        >
-          <PlusIcon className="size-3.5" />
-          {isAddingSavedBackend ? "Adding…" : "Add environment"}
-        </Button>
-      </div>
-      <div className="overflow-hidden rounded-lg border border-border/60">
-        <div className="flex items-center justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">Suggested hosts</p>
-            <p className="text-[11px] text-muted-foreground">From SSH config and known hosts</p>
-          </div>
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={isLoadingDiscoveredSshHosts}
-            onClick={() => void loadDiscoveredSshHosts()}
-          >
-            {isLoadingDiscoveredSshHosts ? (
-              <RefreshCwIcon className="size-3 animate-spin" />
-            ) : (
-              <RefreshCwIcon className="size-3" />
-            )}
-            Refresh
-          </Button>
-        </div>
-        <ScrollArea scrollFade className="max-h-56">
-          <div>
-            {unsavedDiscoveredSshHosts.map((target) => (
-              <DesktopSshHostRow
-                key={`${target.alias}:${target.hostname}:${target.port ?? ""}`}
-                target={target}
-                connectingHostAlias={connectingSshHostAlias}
-                onConnect={(nextTarget) => void handleConnectSshHost(nextTarget)}
-              />
-            ))}
-            {hasLoadedDiscoveredSshHosts &&
-            !isLoadingDiscoveredSshHosts &&
-            unsavedDiscoveredSshHosts.length === 0 ? (
-              <div className={ITEM_ROW_CLASSNAME}>
-                <p className="text-xs text-muted-foreground">No new SSH hosts were discovered.</p>
-              </div>
-            ) : null}
-          </div>
-        </ScrollArea>
-      </div>
-    </div>
-  );
   const renderNetworkAccessToggle = () => (
     <Switch
       checked={desktopServerExposureState?.mode === "network-accessible"}
@@ -2299,41 +1713,10 @@ export function ConnectionsSettings() {
               isDefault={endpointKey === defaultDesktopAdvertisedEndpointKey}
               presentation={presentation}
               onSetDefault={handleSetDefaultAdvertisedEndpoint}
-              onSetupTailscaleServe={handleStartTailscaleServeSetup}
-              onDisableTailscaleServe={handleStartTailscaleServeDisable}
-              isUpdatingTailscaleServe={isUpdatingTailscaleServe}
             />
           );
         })
       : null;
-  const renderTailscaleRow = () => (
-    <SettingsRow
-      title="Tailscale HTTPS"
-      description={
-        tailscaleHttpsEndpoint
-          ? tailscaleHttpsEndpoint.status === "available"
-            ? tailscaleHttpsEndpoint.httpBaseUrl
-            : "Use Tailscale Serve to expose this backend through a MagicDNS HTTPS URL."
-          : "Start Tailscale to set up HTTPS access through MagicDNS."
-      }
-      control={
-        tailscaleHttpsEndpoint ? (
-          <Switch
-            checked={tailscaleHttpsEndpoint.status === "available"}
-            disabled={isUpdatingTailscaleServe}
-            onCheckedChange={(checked) => {
-              if (checked) {
-                handleStartTailscaleServeSetup(tailscaleHttpsEndpoint);
-                return;
-              }
-              handleStartTailscaleServeDisable(tailscaleHttpsEndpoint);
-            }}
-            aria-label="Enable Tailscale HTTPS"
-          />
-        ) : null
-      }
-    />
-  );
   const renderAuthorizedClients = (presentation: AccessSectionPresentation) => (
     <>
       {desktopAccessManagementError ? (
@@ -2440,7 +1823,6 @@ export function ConnectionsSettings() {
               <>
                 {renderNetworkAccessRow()}
                 {renderEndpointRows("endpoint-rail")}
-                {renderTailscaleRow()}
               </>
             ) : (
               renderDisabledNetworkAccessRow()
@@ -2514,110 +1896,6 @@ export function ConnectionsSettings() {
               </AlertDialogFooter>
             </AlertDialogPopup>
           </AlertDialog>
-          <AlertDialog
-            open={disableTailscaleServeDialogOpen}
-            onOpenChange={(open) => {
-              if (isUpdatingTailscaleServe) return;
-              setDisableTailscaleServeDialogOpen(open);
-            }}
-          >
-            <AlertDialogPopup>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Disable Tailscale HTTPS?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  Prompt Factory will restart the local backend without Tailscale Serve.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogClose
-                  disabled={isUpdatingTailscaleServe}
-                  render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
-                >
-                  Cancel
-                </AlertDialogClose>
-                <Button
-                  variant="destructive"
-                  onClick={() => void handleConfirmTailscaleServeDisable()}
-                  disabled={isUpdatingTailscaleServe}
-                >
-                  {isUpdatingTailscaleServe ? (
-                    <>
-                      <Spinner className="size-3.5" />
-                      Restarting…
-                    </>
-                  ) : (
-                    "Restart and disable"
-                  )}
-                </Button>
-              </AlertDialogFooter>
-            </AlertDialogPopup>
-          </AlertDialog>
-          <Dialog
-            open={pendingTailscaleServeEndpoint !== null}
-            onOpenChange={(open) => {
-              if (isUpdatingTailscaleServe) return;
-              if (!open) setPendingTailscaleServeEndpoint(null);
-            }}
-          >
-            <DialogPopup className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Set up Tailscale HTTPS?</DialogTitle>
-                <DialogDescription>
-                  Prompt Factory will restart the local backend with Tailscale Serve enabled and ask
-                  Tailscale to proxy HTTPS traffic to this backend.
-                </DialogDescription>
-              </DialogHeader>
-              <DialogPanel className="space-y-4">
-                <label className="block">
-                  <span className="text-sm font-medium text-foreground">HTTPS port</span>
-                  <Input
-                    className="mt-2"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={65_535}
-                    step={1}
-                    value={tailscaleServePortInput}
-                    onChange={(event) => setTailscaleServePortInput(event.target.value)}
-                    disabled={isUpdatingTailscaleServe}
-                  />
-                </label>
-                {!isTailscaleServePortValid ? (
-                  <p className="mt-2 text-xs text-destructive">Enter a port from 1 to 65535.</p>
-                ) : null}
-                <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-                  <p className="text-xs font-medium text-muted-foreground">HTTPS endpoint</p>
-                  <p
-                    className="mt-1 truncate text-sm text-foreground"
-                    title={pendingTailscaleServeBaseUrl ?? undefined}
-                  >
-                    {pendingTailscaleServeBaseUrl ?? "Pending MagicDNS endpoint"}
-                  </p>
-                </div>
-              </DialogPanel>
-              <DialogFooter>
-                <DialogClose
-                  disabled={isUpdatingTailscaleServe}
-                  render={<Button variant="outline" disabled={isUpdatingTailscaleServe} />}
-                >
-                  Cancel
-                </DialogClose>
-                <Button
-                  onClick={() => void handleConfirmTailscaleServeSetup()}
-                  disabled={isUpdatingTailscaleServe || !isTailscaleServePortValid}
-                >
-                  {isUpdatingTailscaleServe ? (
-                    <>
-                      <Spinner className="size-3.5" />
-                      Restarting…
-                    </>
-                  ) : (
-                    "Enable"
-                  )}
-                </Button>
-              </DialogFooter>
-            </DialogPopup>
-          </Dialog>
         </>
       ) : (
         <SettingsSection title="Local backend access">
@@ -2666,27 +1944,7 @@ export function ConnectionsSettings() {
                 <DialogDescription>Pair another environment to this client.</DialogDescription>
               </DialogHeader>
               <DialogPanel>
-                <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {renderConnectionModeCard({
-                      mode: "remote",
-                      title: "Remote link",
-                      description: "Enter a backend host and pairing code.",
-                      icon: <ChevronsLeftRightEllipsisIcon aria-hidden className="size-4" />,
-                    })}
-                    {desktopBridge
-                      ? renderConnectionModeCard({
-                          mode: "ssh",
-                          title: "SSH",
-                          description: "Use local SSH config, agent, and tunnels for the backend.",
-                          icon: <TerminalIcon aria-hidden className="size-4" />,
-                        })
-                      : null}
-                  </div>
-                  <AnimatedHeight>
-                    {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
-                  </AnimatedHeight>
-                </div>
+                <AnimatedHeight>{renderRemoteModeBody()}</AnimatedHeight>
               </DialogPanel>
             </DialogPopup>
           </Dialog>

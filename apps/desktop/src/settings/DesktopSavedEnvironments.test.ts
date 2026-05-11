@@ -22,12 +22,6 @@ const savedRegistryRecord: PersistedSavedEnvironmentRecord = {
   wsBaseUrl: "wss://remote.example.com/",
   createdAt: "2026-04-09T00:00:00.000Z",
   lastConnectedAt: "2026-04-09T01:00:00.000Z",
-  desktopSsh: {
-    alias: "devbox",
-    hostname: "devbox.example.com",
-    username: "julius",
-    port: 22,
-  },
 };
 
 const SavedEnvironmentRegistryDocumentProbe = Schema.Struct({
@@ -178,12 +172,6 @@ describe("DesktopSavedEnvironments", () => {
                 "wsBaseUrl": "wss://remote.example.com/",
                 "createdAt": "2026-04-09T00:00:00.000Z",
                 "lastConnectedAt": "2026-04-09T01:00:00.000Z",
-                "desktopSsh": {
-                  "alias": "devbox",
-                  "hostname": "devbox.example.com",
-                  "username": "julius",
-                  "port": 22,
-                },
               },
             ],
           }\n`,
