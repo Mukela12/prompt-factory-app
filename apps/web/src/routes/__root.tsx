@@ -61,29 +61,11 @@ import {
   resolveInitialServerAuthGateState,
   updatePrimaryEnvironmentDescriptor,
 } from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
 }>()({
-  beforeLoad: async ({ location }) => {
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
-      return {
-        authGateState: {
-          status: "hosted-pairing",
-        } as const,
-      };
-    }
-
-    if (isHostedStaticApp(new URL(window.location.href))) {
-      await waitForSavedEnvironmentRegistryHydration();
-      return {
-        authGateState: {
-          status: "hosted-static",
-        } as const,
-      };
-    }
-
+  beforeLoad: async () => {
     const [, authGateState] = await Promise.all([
       ensurePrimaryEnvironmentReady(),
       resolveInitialServerAuthGateState(),
@@ -117,7 +99,7 @@ function RootRouteView() {
     return <Outlet />;
   }
 
-  if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
+  if (authGateState.status !== "authenticated") {
     return <Outlet />;
   }
 

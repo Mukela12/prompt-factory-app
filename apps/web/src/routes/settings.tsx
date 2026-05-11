@@ -104,11 +104,8 @@ function SettingsRouteLayout() {
 
 export const Route = createFileRoute("/settings")({
   beforeLoad: async ({ context, location }) => {
-    if (
-      context.authGateState.status !== "authenticated" &&
-      context.authGateState.status !== "hosted-static"
-    ) {
-      throw redirect({ to: "/pair", replace: true });
+    if (context.authGateState.status !== "authenticated") {
+      throw redirect({ to: "/", replace: true });
     }
 
     if (location.pathname === "/settings") {

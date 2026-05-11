@@ -22,7 +22,7 @@ import * as DateTime from "effect/DateTime";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { cn } from "../../lib/utils";
 import { formatElapsedDurationLabel, formatExpiresInLabel } from "../../timestampFormat";
-import { resolveDesktopPairingUrl, resolveHostedPairingUrl } from "./pairingUrls";
+import { resolveDesktopPairingUrl } from "./pairingUrls";
 import {
   SettingsPageContainer,
   SettingsRow,
@@ -71,7 +71,6 @@ import {
 } from "../ui/menu";
 import { Textarea } from "../ui/textarea";
 import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "../../pairingUrl";
-import { readHostedPairingRequest } from "../../hostedPairing";
 import {
   createServerPairingCredential,
   fetchSessionState,
@@ -268,14 +267,6 @@ function parsePairingUrlFields(
         ? trimmed
         : `https://${trimmed}`;
     const url = new URL(urlLikeInput, window.location.origin);
-    const hostedPairingRequest = readHostedPairingRequest(url);
-    if (hostedPairingRequest) {
-      return {
-        host: hostedPairingRequest.host,
-        pairingCode: hostedPairingRequest.token,
-      };
-    }
-
     const pairingCode = getPairingTokenFromUrl(url);
     if (!pairingCode) return null;
     return {
@@ -470,12 +461,6 @@ function resolveAdvertisedEndpointPairingUrl(
   endpoint: AdvertisedEndpoint,
   credential: string,
 ): string {
-  if (endpoint.compatibility.hostedHttpsApp === "compatible") {
-    return (
-      resolveHostedPairingUrl(endpoint.httpBaseUrl, credential) ??
-      resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential)
-    );
-  }
   return resolveDesktopPairingUrl(endpoint.httpBaseUrl, credential);
 }
 
@@ -523,13 +508,6 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
     () => resolveCurrentOriginPairingUrl(pairingLink.credential),
     [pairingLink.credential],
   );
-  const hostedPairingUrl = useMemo(
-    () =>
-      endpointUrl != null && endpointUrl !== ""
-        ? resolveHostedPairingUrl(endpointUrl, pairingLink.credential)
-        : null,
-    [endpointUrl, pairingLink.credential],
-  );
   const endpointPairingUrl = useMemo(() => {
     const endpoint = selectPairingEndpoint(endpoints, defaultEndpointKey);
     return endpoint ? resolveAdvertisedEndpointPairingUrl(endpoint, pairingLink.credential) : null;
@@ -552,7 +530,7 @@ const PairingLinkListRow = memo(function PairingLinkListRow({
   const shareablePairingUrl =
     endpointPairingUrl ??
     (endpointUrl != null && endpointUrl !== ""
-      ? (hostedPairingUrl ?? resolveDesktopPairingUrl(endpointUrl, pairingLink.credential))
+      ? resolveDesktopPairingUrl(endpointUrl, pairingLink.credential)
       : isLoopbackHostname(window.location.hostname)
         ? null
         : currentOriginPairingUrl);
