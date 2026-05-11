@@ -2,11 +2,12 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  LMStudioSettings,
   OpenCodeSettings,
   ProviderDriverKind,
 } from "@prompt-factory/contracts";
 import type * as Schema from "effect/Schema";
-import { ClaudeAI, CursorIcon, type Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, CursorIcon, type Icon, LMStudioIcon, OpenAI, OpenCodeIcon } from "../Icons";
 
 type ProviderSettingsSchema = {
   readonly fields: Readonly<Record<string, Schema.Top>>;
@@ -34,6 +35,12 @@ export interface ProviderClientDefinition {
 }
 
 export const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
+  {
+    value: ProviderDriverKind.make("lmStudio"),
+    label: "LMStudio",
+    icon: LMStudioIcon,
+    settingsSchema: LMStudioSettings,
+  },
   {
     value: ProviderDriverKind.make("codex"),
     label: "Codex",
