@@ -37,8 +37,11 @@ import {
 } from "@prompt-factory/contracts";
 import {
   createChatCompletion,
+  createToolRegistry,
+  loadConfig,
   type LMStudioMessage,
   type LMStudioToolCall,
+  type ToolRegistry,
 } from "@prompt-factory/lmstudio";
 
 import {
@@ -51,9 +54,44 @@ import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogg
 import { type LMStudioAdapterShape } from "../Services/LMStudioAdapter.ts";
 
 const PROVIDER = ProviderDriverKind.make("lmStudio");
-const DEFAULT_SYSTEM_PROMPT =
-  "You are a local LM Studio assistant running entirely on the user's machine. " +
-  "Be concise, accurate, and acknowledge when you are unsure.";
+function safeJsonStringify(value: unknown): string {
+  try {
+    const json = JSON.stringify(value);
+    if (typeof json === "string") return json;
+  } catch {
+    /* fallthrough */
+  }
+  return JSON.stringify({ result: String(value) });
+}
+
+function safeJsonParseObject(text: string | undefined): Record<string, unknown> {
+  if (!text) return {};
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* fallthrough */
+  }
+  return {};
+}
+
+function buildSystemPrompt(workspaceRoot: string): string {
+  return [
+    "You are a local coding agent running against LM Studio on the user's machine.",
+    `Your workspace root is: ${workspaceRoot}`,
+    "All tool path arguments must be relative to the workspace root. Never use absolute paths in tool arguments.",
+    "When asked to analyze a repository or codebase, call workspace_overview first, then inspect specific files with read_file or search_files.",
+    "Use read_file, list_files, and search_files to inspect code before editing.",
+    "Use make_directory when the user asks for a new folder or project.",
+    "Use write_file or replace_in_file for code changes.",
+    "Use run_command for short-lived commands such as tests, builds, formatting, git inspection, and package installs.",
+    "If a tool reports a workspace configuration error, stop and explain it instead of retrying.",
+    "If you repeat the same tool call several times with the same arguments, you are stuck — change strategy.",
+    "Be explicit about what you changed and why.",
+  ].join("\n");
+}
 
 class LMStudioChatError extends Data.TaggedError("LMStudioChatError")<{
   readonly detail: string;
@@ -78,6 +116,8 @@ interface LMStudioSessionContext {
       }
     | undefined;
   readonly stopped: Ref.Ref<boolean>;
+  readonly registry: ToolRegistry;
+  readonly workspaceRoot: string;
 }
 
 export interface LMStudioAdapterLiveOptions {
@@ -297,13 +337,19 @@ export function makeLMStudioAdapter(
           runtimeMode: input.runtimeMode,
         });
 
+        const workspaceRoot = input.cwd ?? process.cwd();
+        const agentConfig = loadConfig({ workspaceRoot });
+        const registry = createToolRegistry(agentConfig);
+
         const context: LMStudioSessionContext = {
           session,
           threadId: input.threadId,
-          messages: [{ role: "system", content: DEFAULT_SYSTEM_PROMPT }],
+          messages: [{ role: "system", content: buildSystemPrompt(workspaceRoot) }],
           turns: [],
           activeTurn: undefined,
           stopped: yield* Ref.make(false),
+          registry,
+          workspaceRoot,
         };
 
         sessions.set(input.threadId, context);
@@ -376,6 +422,7 @@ export function makeLMStudioAdapter(
                   apiPath: lmStudioSettings.apiPath,
                   model,
                   messages: context.messages,
+                  tools: context.registry.openAiTools,
                 }),
               catch: (cause) =>
                 new LMStudioChatError({
@@ -434,16 +481,26 @@ export function makeLMStudioAdapter(
 
             for (const toolCall of toolCalls) {
               yield* emitToolLifecycle(context, turnId, toolCall);
-              // The LM Studio runtime does not currently execute tools server
-              // side — the embedded `LocalCodingAgent` does that out of band.
-              // For Phase 5b we acknowledge the request and respond with a
-              // synthetic "tool not executed" body so the chat loop can
-              // terminate cleanly rather than spinning the model in a retry.
+
+              const parsedArgs = safeJsonParseObject(toolCall.function.arguments);
+
+              const execExit = yield* Effect.exit(
+                Effect.tryPromise({
+                  try: () => context.registry.execute(toolCall.function.name, parsedArgs),
+                  catch: (cause) =>
+                    new LMStudioChatError({ detail: errorDetail(cause), cause }),
+                }),
+              );
+
+              const resultBody =
+                execExit._tag === "Success"
+                  ? safeJsonStringify(execExit.value)
+                  : safeJsonStringify({ error: errorDetail(execExit.cause) });
+
               context.messages.push({
                 role: "tool",
                 tool_call_id: toolCall.id,
-                content:
-                  '{"notice":"Tool execution is not wired up in this LM Studio adapter. Produce a final answer without further tool calls."}',
+                content: resultBody,
               });
             }
             continue;
