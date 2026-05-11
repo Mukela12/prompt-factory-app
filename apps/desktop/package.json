@@ -1,0 +1,38 @@
+{
+  "name": "@prompt-factory/desktop",
+  "version": "0.0.23",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "bun run --parallel dev:bundle dev:electron",
+    "dev:bundle": "tsdown --watch",
+    "dev:electron": "node scripts/dev-electron.mjs",
+    "build": "tsdown",
+    "start": "node scripts/start-electron.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "smoke-test": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "effect": "catalog:",
+    "electron": "41.5.0",
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@effect/language-service": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@prompt-factory/client-runtime": "workspace:*",
+    "@prompt-factory/contracts": "workspace:*",
+    "@prompt-factory/shared": "workspace:*",
+    "@prompt-factory/ssh": "workspace:*",
+    "@prompt-factory/tailscale": "workspace:*",
+    "@types/node": "catalog:",
+    "effect-acp": "workspace:*",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "productName": "Prompt Factory"
+}

@@ -1,0 +1,55 @@
+{
+  "name": "pf",
+  "version": "0.0.23",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mukela12/prompt-factory-app",
+    "directory": "apps/server"
+  },
+  "bin": {
+    "pf": "./dist/bin.mjs"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/bin.ts",
+    "build": "node scripts/cli.ts build",
+    "build:bundle": "tsdown",
+    "start": "node dist/bin.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:process-reaper": "vitest run src/server.test.ts src/provider/Layers/ClaudeAdapter.test.ts src/provider/Layers/ProviderSessionDirectory.test.ts src/provider/Layers/ProviderSessionReaper.test.ts src/provider/Layers/CodexAdapter.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
+    "@effect/platform-bun": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@opencode-ai/sdk": "^1.3.15",
+    "@pierre/diffs": "catalog:",
+    "effect": "catalog:",
+    "node-pty": "^1.1.0",
+    "open": "^10.1.0"
+  },
+  "devDependencies": {
+    "@effect/language-service": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@prompt-factory/contracts": "workspace:*",
+    "@prompt-factory/shared": "workspace:*",
+    "@prompt-factory/tailscale": "workspace:*",
+    "@prompt-factory/web": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "effect-acp": "workspace:*",
+    "effect-codex-app-server": "workspace:*",
+    "tsdown": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "engines": {
+    "node": "^22.16 || ^23.11 || >=24.10"
+  }
+}
