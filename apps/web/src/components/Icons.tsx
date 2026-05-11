@@ -638,32 +638,31 @@ export const AntigravityIcon: Icon = (props) => (
 export const LMStudioIcon: Icon = ({ className, ...props }) => (
   <svg
     {...props}
-    viewBox="0 0 24 24"
-    fill="none"
+    viewBox="0 0 100 100"
     xmlns="http://www.w3.org/2000/svg"
-    className={cn("text-current", className)}
+    className={cn(className)}
   >
-    <rect x="2" y="4" width="20" height="14" rx="2.5" stroke="currentColor" strokeWidth="1.6" />
-    <path
-      d="M8 22h8M12 18v4"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-    />
-    <path
-      d="M7 9v6M7 15h4M14 9v6"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M14 9l2.5 4 2.5-4v6"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+    <defs>
+      <linearGradient id="lmStudioBg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stopColor="#6c6cf0" />
+        <stop offset="100%" stopColor="#4a3fd1" />
+      </linearGradient>
+    </defs>
+    <rect width="100" height="100" rx="20" fill="url(#lmStudioBg)" />
+    <g fill="#ffffff">
+      <rect x="22" y="22.5" width="43" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="22" y="22.5" width="33" height="6" rx="3" />
+      <rect x="33" y="32.5" width="49" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="33" y="32.5" width="36" height="6" rx="3" />
+      <rect x="27" y="42.5" width="42" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="27" y="42.5" width="35" height="6" rx="3" />
+      <rect x="18" y="52.5" width="51" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="18" y="52.5" width="38" height="6" rx="3" />
+      <rect x="26" y="62.5" width="43" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="26" y="62.5" width="34" height="6" rx="3" />
+      <rect x="51" y="72.5" width="31" height="6" rx="3" fillOpacity="0.55" />
+      <rect x="51" y="72.5" width="22" height="6" rx="3" />
+    </g>
   </svg>
 );
 
